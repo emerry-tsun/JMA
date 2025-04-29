@@ -12,11 +12,10 @@ import xml.etree.ElementTree as ET
 import re
 import multiprocessing
 from atproto import Client, client_utils, models
-#import chardet
 
-DEBUG = 0;
-DELAY_START = 20;	# 処理開始を20秒待つ
-LOCK_TIMEOUT = 540;	# ロックのタイムアウト
+DEBUG = 0
+DELAY_START = 20	# 処理開始を20秒待つ
+LOCK_TIMEOUT = 540	# ロックのタイムアウト
 URL_JMA_PULL = 'https://www.data.jma.go.jp/developer/xml/feed/extra.xml'
 XML_BASE = '{http://xml.kishou.go.jp/jmaxml1/}'
 ITEM_TITLE = '気象特別警報・警報・注意報'
@@ -51,7 +50,7 @@ def check_last_modified():
     if 'Last-Modified' in response.headers:
         cur_last_modified_str = response.headers['Last-Modified']
         cur_last_modified = int(email.utils.parsedate_to_datetime(cur_last_modified_str).timestamp())
-        syslog.syslog(syslog.LOG_INFO, f"current last_modified={cur_last_modified}");
+        syslog.syslog(syslog.LOG_INFO, f"current last_modified={cur_last_modified}")
     else:
         syslog.syslog(syslog.LOG_ERR, f"No Last-Modified field in header.")
 
