@@ -453,13 +453,19 @@ def fetch_xml(url, ref_area):
                         if code in current[kind_str]:
                             status = '継続'
                         else:
-                            if kind_up_str and current.get(kind_up_str) and ref_to_up and current[kind_up_str].get(ref_to_up.get(code)):
+                            key = ref_to_up.get(code) if ref_to_up else None
+                            key2 = ref_to_up2.get(code) if ref_to_up2 else None
+                            keyd = ref_to_down.get(code) if ref_to_down else None
+                            keyd2 = ref_to_down2.get(code) if ref_to_down2 else None
+
+                            if kind_up_str and current.get(kind_up_str) and key is not None and key in current[kind_up_str]:
+                                # DEBUG 2025.05.04
                                 status = ref_to_up['status']
-                            elif kind_up2_str and current.get(kind_up2_str) and ref_to_up2 and current[kind_up2_str].get(ref_to_up2.get(code)):
+                            elif kind_up2_str and current.get(kind_up2_str) and key2 is not None and key2 in current[kind_up2_str]:
                                 status = ref_to_up2['status']
-                            elif kind_down_str and current.get(kind_down_str) and ref_to_down and current[kind_down_str].get(ref_to_down.get(code)):
+                            elif kind_down_str and current.get(kind_down_str) and keyd is not None and keyd in current[kind_down_str]:
                                 status = ref_to_down['status']
-                            elif kind_down2_str and current.get(kind_down2_str) and ref_to_down2 and current[kind_down2_str].get(ref_to_down2.get(code)):
+                            elif kind_down2_str and current.get(kind_down2_str) and keyd2 is not None and keyd2 in current[kind_down2_str]:
                                 status = ref_to_down2['status']
                             else:
                                 status = '解除'
@@ -473,13 +479,18 @@ def fetch_xml(url, ref_area):
                         ref_kind_out[code] = f"{code_kind[code]}{current[kind_str].get(code, '')},{status}"
                         ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
                     elif code in current[kind_str]:
-                        if ref_last.get(kind_up_str, {}).get(ref_to_up.get(code)):
+                        key = ref_to_up.get(code) if ref_to_up else None
+                        key2 = ref_to_up2.get(code) if ref_to_up2 else None
+                        keyd = ref_to_down.get(code) if ref_to_down else None
+                        keyd2 = ref_to_down2.get(code) if ref_to_down2 else None
+
+                        if kind_up_str and ref_last.get(kind_up_str, {}) and key is not None and key in ref_last[kind_up_str]:
                             status = ref_to_up['rstatus']
-                        elif ref_last.get(kind_up2_str, {}).get(ref_to_up2.get(code)):
+                        elif kind_up2_str and ref_last.get(kind_up2_str, {}) and key2 is not None and key2 in ref_last[kind_up2_str]:
                             status = ref_to_up2['rstatus']
-                        elif ref_last.get(kind_down_str, {}).get(ref_to_down.get(code)):
+                        elif kind_down_str and ref_last.get(kind_down_str, {}) and keyd is not None and keyd in ref_last[kind_down_str]:
                             status = ref_to_down['rstatus']
-                        elif ref_last.get(kind_down2_str, {}).get(ref_to_down2.get(code)):
+                        elif kind_down2_str and ref_last.get(kind_down2_str, {}) and keyd2 is not None and keyd2 in ref_last[kind_down2_str]:
                             status = ref_to_down2['rstatus']
                         else:
                             status = '発表'
