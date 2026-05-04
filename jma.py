@@ -34,8 +34,8 @@ POST_RETRY = 3
 POST_INTERVAL = 10
 # global variables
 pref = {}  # pref_name => hash (key=area_code)
-area = {}  # area_code => [acct_wa, acct_ww, acct_wk, acct_wew, acct_ewa, acct_eww, acct_ewk, acct_ewew]
-acct_area = {}  # acct => {'lang': 'ja'/'en', 'code': area_code, 'name': pref_name, 'grade': '注意報'/..., 'tag': hash_tag}
+area = {}  # area_code => [acct_wa, acct_ww, acct_wuw, acct_wew]
+acct_area = {}  # acct => {'lang': 'ja'/'en', 'code': area_code, 'name': pref_name, 'grade': '注意報(Level 2)'/..., 'tag': hash_tag}
 post_acct = {}	# acct => { 'bs_username': bs_username, 'bs_passwd': bs_passwd }
 
 def check_last_modified():
@@ -78,30 +78,30 @@ def read_area():
                 if line.startswith('PARAM'):
                     continue
                 parts = line.split(',')
-                # 新形式(15列): acct_wk / acct_ewk を追加
-                # 旧形式(13列): acct_wk / acct_ewk は空文字列（後方互換）
+                # 新形式(15列): acct_wuw / acct_ewuw を追加
+                # 旧形式(13列): acct_wuw / acct_ewuw は空文字列（後方互換）
                 if len(parts) >= 15:
-                    a_code, name, name_e, p_pron, p_name, acct_wa, acct_ww, acct_wk, acct_wew, acct_ewa, acct_eww, acct_ewk, acct_ewew, tag, tag_e = parts[0:15]
+                    a_code, name, name_e, p_pron, p_name, acct_wa, acct_ww, acct_wuw, acct_wew, acct_ewa, acct_eww, acct_ewuw, acct_ewew, tag, tag_e = parts[0:15]
                 else:
                     a_code, name, name_e, p_pron, p_name, acct_wa, acct_ww, acct_wew, acct_ewa, acct_eww, acct_ewew, tag, tag_e = parts[0:13]
-                    acct_wk = ''
-                    acct_ewk = ''
+                    acct_wuw = ''
+                    acct_ewuw = ''
 
                 # area: [ja注意報, ja警報, ja危険警報, ja特別警報, en注意報, en警報, en危険警報, en特別警報]
-                tmp = [acct_wa, acct_ww, acct_wk, acct_wew, acct_ewa, acct_eww, acct_ewk, acct_ewew]
+                tmp = [acct_wa, acct_ww, acct_wuw, acct_wew, acct_ewa, acct_eww, acct_ewuw, acct_ewew]
                 pref_t.setdefault(p_name, []).append(a_code)
                 area[a_code] = tmp
                 # acct_area
-                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報',          'tag': tag}
-                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報',            'tag': tag}
-                if acct_wk:
-                    acct_area[acct_wk] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報',       'tag': tag}
-                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報',        'tag': tag}
-                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory',        'tag': tag_e}
-                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning',         'tag': tag_e}
-                if acct_ewk:
-                    acct_area[acct_ewk] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Danger Warning', 'tag': tag_e}
-                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning','tag': tag_e}
+                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報(Level 2)',  'tag': tag}
+                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報(Level 3)',    'tag': tag}
+                if acct_wuw:
+                    acct_area[acct_wuw] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報(Level 4)', 'tag': tag}
+                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報(Level 5)', 'tag': tag}
+                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory(Level 2)',        'tag': tag_e}
+                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning(Level 3)',         'tag': tag_e}
+                if acct_ewuw:
+                    acct_area[acct_ewuw] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Urgent Warning(Level 4)', 'tag': tag_e}
+                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning(Level 5)', 'tag': tag_e}
     except (FileNotFoundError, IOError) as e:
         syslog.syslog(syslog.LOG_ERR, f": File {AREA_CSV}: {e}")
 
@@ -145,22 +145,22 @@ def check(feed):
     return links
 
 # def read_last(area_code)
-# return ref_last { wa => { code => 1,...}, ww => {...}, wk => {...}, wew => {...}}
-# 新形式(5行): wa, ww, wk, wew, time
+# return ref_last { wa => { code => 1,...}, ww => {...}, wuw => {...}, wew => {...}}
+# 新形式(5行): wa, ww, wuw, wew, time
 # 旧形式(4行): wa, ww, wew, time  ← 後方互換
 def read_last(area_code):
-    ref_last = {'wa': {}, 'ww': {}, 'wk': {}, 'wew': {}}
+    ref_last = {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}
 
     try:
         with open(f"{LAST_DIR}{area_code}", 'r') as f:
             lines = f.readlines()
 
         if len(lines) >= 5:
-            # 新形式: wa, ww, wk, wew, time
-            keys_order = ['wa', 'ww', 'wk', 'wew']
+            # 新形式: wa, ww, wuw, wew, time
+            keys_order = ['wa', 'ww', 'wuw', 'wew']
             time_idx = 4
         else:
-            # 旧形式: wa, ww, wew, time（wk は空のまま）
+            # 旧形式: wa, ww, wew, time（wuw は空のまま）
             keys_order = ['wa', 'ww', 'wew']
             time_idx = 3
 
@@ -178,15 +178,15 @@ def read_last(area_code):
 
     return ref_last
 
-# def write_last(area_code, ref_wa, ref_ww, ref_wk, ref_wew, report_time)
-# 新形式(5行): wa, ww, wk, wew, time
-def write_last(area_code, ref_wa, ref_ww, ref_wk, ref_wew, report_time):
+# def write_last(area_code, ref_wa, ref_ww, ref_wuw, ref_wew, report_time)
+# 新形式(5行): wa, ww, wuw, wew, time
+def write_last(area_code, ref_wa, ref_ww, ref_wuw, ref_wew, report_time):
     if not os.path.isdir(LAST_DIR):
         os.mkdir(LAST_DIR, mode=0o755)
 
     try:
         with open(f"{LAST_DIR}{area_code}", 'w') as f:
-            for ref in [ref_wa, ref_ww, ref_wk, ref_wew]:
+            for ref in [ref_wa, ref_ww, ref_wuw, ref_wew]:
                 codes = [code for code in ref if not re.search(r'(解除|に切り替え|なし|へ変化)', ref[code])]
                 f.write(','.join(codes) + '\n')
             f.write(f"{report_time:d}" + '\n')
@@ -274,11 +274,11 @@ code_kind_e = {
     '36': 'Heavy snow',
     '37': 'High waves',
     '38': 'Storm surge',
-    # Danger Warning (code 40-49) — New May 2026
-    '40': 'Flooding',       # Level 4 Flood Danger Warning (VXKOii)
-    '43': 'Heavy rain',     # Level 4 Heavy Rain Danger Warning
-    '48': 'Storm surge',    # Level 4 Storm Surge Danger Warning
-    '49': 'Landslide',      # Level 4 Landslide Danger Warning
+    # Urgent Warning (code 40-49) — New May 2026
+    '40': 'Flooding',       # Level 4 Flood Urgent Warning (VXKOii)
+    '43': 'Heavy rain',     # Level 4 Heavy Rain Urgent Warning
+    '48': 'Storm surge',    # Level 4 Storm Surge Urgent Warning
+    '49': 'Landslide',      # Level 4 Landslide Urgent Warning
 }
 
 # ── 隣接1段階の遷移 ──────────────────────────────────────────────
@@ -309,8 +309,8 @@ wa_ww = {
     'rstatus': '警報から注意報'
 }
 
-# 危険警報(wk) ↔ 警報(ww) ※2026年5月新設
-ww_wk = {
+# 危険警報(wuw) ↔ 警報(ww) ※2026年5月新設
+ww_wuw = {
     '03': '43',   # 大雨警報     → 大雨危険警報
     '08': '48',   # 高潮警報     → 高潮危険警報
     '09': '49',   # 土砂災害警報 → 土砂災害危険警報
@@ -318,7 +318,7 @@ ww_wk = {
     'rstatus': '危険警報から警報'
 }
 
-wk_ww = {
+wuw_ww = {
     '43': '03',
     '48': '08',
     '49': '09',
@@ -326,15 +326,15 @@ wk_ww = {
     'rstatus': '警報から危険警報'
 }
 
-# 特別警報(wew) ↔ 危険警報(wk) ※2026年5月新設
-wk_wew = {
+# 特別警報(wew) ↔ 危険警報(wuw) ※2026年5月新設
+wuw_wew = {
     '43': '33',   # 大雨危険警報 → 大雨特別警報
     '48': '38',   # 高潮危険警報 → 高潮特別警報
     'status': '特別警報へ変化',
     'rstatus': '特別警報から危険警報'
 }
 
-wew_wk = {
+wew_wuw = {
     '33': '43',
     '38': '48',
     'status': '危険警報に切り替え',
@@ -342,8 +342,8 @@ wew_wk = {
 }
 
 # ── 2段階スキップの遷移 ────────────────────────────────────────────
-# 危険警報(wk) ↔ 注意報(wa)
-wa_wk = {
+# 危険警報(wuw) ↔ 注意報(wa)
+wa_wuw = {
     '10': '43',   # 大雨注意報     → 大雨危険警報
     '19': '48',   # 高潮注意報     → 高潮危険警報
     '29': '49',   # 土砂災害注意報 → 土砂災害危険警報
@@ -351,7 +351,7 @@ wa_wk = {
     'rstatus': '危険警報から注意報'
 }
 
-wk_wa = {
+wuw_wa = {
     '43': '10',
     '48': '19',
     '49': '29',
@@ -359,7 +359,7 @@ wk_wa = {
     'rstatus': '注意報から危険警報'
 }
 
-# 特別警報(wew) ↔ 警報(ww)（wkをスキップ）
+# 特別警報(wew) ↔ 警報(ww)（wuwをスキップ）
 wew_ww = {
     '33': '03',
     '36': '06',
@@ -410,8 +410,8 @@ status_ja_en = {
     '発表': 'Announcement',
     '継続': 'Continuation',
     # 特別警報 ↔ 危険警報 ※2026年5月新設
-    '特別警報から危険警報': 'Emergency Warning to Danger Warning',
-    '危険警報から特別警報': 'Danger Warning to Emergency Warning',
+    '特別警報から危険警報': 'Emergency Warning to Urgent Warning',
+    '危険警報から特別警報': 'Urgent Warning to Emergency Warning',
     # 特別警報 ↔ 警報
     '特別警報から警報': 'Emergency Warning to Warning',
     '警報から特別警報': 'Warning to Emergency Warning',
@@ -419,11 +419,11 @@ status_ja_en = {
     '特別警報から注意報': 'Emergency Warning to Advisory',
     '注意報から特別警報': 'Advisory to Emergency Warning',
     # 危険警報 ↔ 警報 ※2026年5月新設
-    '危険警報から警報': 'Danger Warning to Warning',
-    '警報から危険警報': 'Warning to Danger Warning',
+    '危険警報から警報': 'Urgent Warning to Warning',
+    '警報から危険警報': 'Warning to Urgent Warning',
     # 危険警報 ↔ 注意報 ※2026年5月新設
-    '危険警報から注意報': 'Danger Warning to Advisory',
-    '注意報から危険警報': 'Advisory to Danger Warning',
+    '危険警報から注意報': 'Urgent Warning to Advisory',
+    '注意報から危険警報': 'Advisory to Urgent Warning',
     # 警報 ↔ 注意報
     '警報から注意報': 'Warning to Advisory',
     '注意報から警報': 'Advisory to Warning',
@@ -434,10 +434,10 @@ status_ja_en = {
     '解除(警報へ)': 'Cancel(to Warning)',
     '注意報に切り替え': 'Cancel(to Advisory)',
     '警報に切り替え': 'Cancel(to Warning)',
-    '危険警報に切り替え': 'Cancel(to Danger Warning)',  # ※2026年5月新設
+    '危険警報に切り替え': 'Cancel(to Urgent Warning)',  # ※2026年5月新設
     # 昇格
     '警報へ変化': 'Change to Warning',
-    '危険警報へ変化': 'Change to Danger Warning',        # ※2026年5月新設
+    '危険警報へ変化': 'Change to Urgent Warning',        # ※2026年5月新設
     '特別警報へ変化': 'Change to Emergency Warning',
 }
 
@@ -511,7 +511,7 @@ def fetch_xml(url, ref_area):
                 elif report_time == ref_last['time']:
                     continue
 
-            current = {'wa': {}, 'ww': {}, 'wk': {}, 'wew': {}}
+            current = {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}
             kind = find_element_list_by_tag(item_elem, 'Kind')
             for kind_elem in kind:                      # 各注意報、警報、危険警報、特別警報
                 try:
@@ -535,38 +535,38 @@ def fetch_xml(url, ref_area):
                 elif 2 <= kind_elem_code < 10:          # 警報 (L3)
                     current['ww'][f"{kind_elem_code:02d}"] = condition
                 elif 40 <= kind_elem_code < 50:         # 危険警報 (L4) ※2026年5月新設
-                    current['wk'][f"{kind_elem_code:02d}"] = condition
+                    current['wuw'][f"{kind_elem_code:02d}"] = condition
                 elif 30 <= kind_elem_code < 40:         # 特別警報 (L5)
                     current['wew'][f"{kind_elem_code:02d}"] = condition
 
-            wa = {}; ww = {}; wk = {}; wew = {}
-            ewa = {}; eww = {}; ewk = {}; ewew = {}
+            wa = {}; ww = {}; wuw = {}; wew = {}
+            ewa = {}; eww = {}; ewuw = {}; ewew = {}
             f_wa = 0                                    # 「継続」以外→1
             f_ww = 0
-            f_wk = 0
+            f_wuw = 0
             f_wew = 0
 
-            # 種別のループ（wa=注意報L2, ww=警報L3, wk=危険警報L4, wew=特別警報L5）
-            for kind_str in ['wa', 'ww', 'wk', 'wew']:
+            # 種別のループ（wa=注意報L2, ww=警報L3, wuw=危険警報L4, wew=特別警報L5）
+            for kind_str in ['wa', 'ww', 'wuw', 'wew']:
                 # コード範囲
-                code_min = {'wa': 10, 'ww': 2,  'wk': 40, 'wew': 30}[kind_str]
-                code_max = {'wa': 29, 'ww': 9,  'wk': 49, 'wew': 39}[kind_str]
+                code_min = {'wa': 10, 'ww': 2,  'wuw': 40, 'wew': 30}[kind_str]
+                code_max = {'wa': 29, 'ww': 9,  'wuw': 49, 'wew': 39}[kind_str]
                 # 隣接1段階の遷移先
-                kind_down_str  = {'wa': None,  'ww': 'wa', 'wk': 'ww',  'wew': 'wk' }[kind_str]
-                kind_down2_str = {'wa': None,  'ww': None, 'wk': 'wa',  'wew': 'ww' }[kind_str]
-                kind_down3_str = {'wa': None,  'ww': None, 'wk': None,  'wew': 'wa' }[kind_str]
-                kind_up_str    = {'wa': 'ww',  'ww': 'wk', 'wk': 'wew', 'wew': None }[kind_str]
-                kind_up2_str   = {'wa': 'wk',  'ww': 'wew','wk': None,  'wew': None }[kind_str]
-                kind_up3_str   = {'wa': 'wew', 'ww': None, 'wk': None,  'wew': None }[kind_str]
+                kind_down_str  = {'wa': None,  'ww': 'wa', 'wuw': 'ww',  'wew': 'wuw' }[kind_str]
+                kind_down2_str = {'wa': None,  'ww': None, 'wuw': 'wa',  'wew': 'ww' }[kind_str]
+                kind_down3_str = {'wa': None,  'ww': None, 'wuw': None,  'wew': 'wa' }[kind_str]
+                kind_up_str    = {'wa': 'ww',  'ww': 'wuw', 'wuw': 'wew', 'wew': None }[kind_str]
+                kind_up2_str   = {'wa': 'wuw',  'ww': 'wew','wuw': None,  'wew': None }[kind_str]
+                kind_up3_str   = {'wa': 'wew', 'ww': None, 'wuw': None,  'wew': None }[kind_str]
                 # 遷移マッピング辞書
-                ref_to_down  = {'wa': {},     'ww': ww_wa,  'wk': wk_ww,  'wew': wew_wk}[kind_str]
-                ref_to_down2 = {'wa': {},     'ww': {},     'wk': wk_wa,  'wew': wew_ww}[kind_str]
-                ref_to_down3 = {'wa': {},     'ww': {},     'wk': {},     'wew': wew_wa}[kind_str]
-                ref_to_up    = {'wa': wa_ww,  'ww': ww_wk,  'wk': wk_wew, 'wew': {}   }[kind_str]
-                ref_to_up2   = {'wa': wa_wk,  'ww': ww_wew, 'wk': {},     'wew': {}   }[kind_str]
-                ref_to_up3   = {'wa': wa_wew, 'ww': {},     'wk': {},     'wew': {}   }[kind_str]
-                ref_kind_out   = {'wa': wa,  'ww': ww,  'wk': wk,  'wew': wew }[kind_str]
-                ref_kind_out_e = {'wa': ewa, 'ww': eww, 'wk': ewk, 'wew': ewew}[kind_str]
+                ref_to_down  = {'wa': {},     'ww': ww_wa,  'wuw': wuw_ww,  'wew': wew_wuw}[kind_str]
+                ref_to_down2 = {'wa': {},     'ww': {},     'wuw': wuw_wa,  'wew': wew_ww}[kind_str]
+                ref_to_down3 = {'wa': {},     'ww': {},     'wuw': {},     'wew': wew_wa}[kind_str]
+                ref_to_up    = {'wa': wa_ww,  'ww': ww_wuw,  'wuw': wuw_wew, 'wew': {}   }[kind_str]
+                ref_to_up2   = {'wa': wa_wuw,  'ww': ww_wew, 'wuw': {},     'wew': {}   }[kind_str]
+                ref_to_up3   = {'wa': wa_wew, 'ww': {},     'wuw': {},     'wew': {}   }[kind_str]
+                ref_kind_out   = {'wa': wa,  'ww': ww,  'wuw': wuw, 'wew': wew }[kind_str]
+                ref_kind_out_e = {'wa': ewa, 'ww': eww, 'wuw': ewuw, 'wew': ewew}[kind_str]
 
                 # 種別に属するCodeのループ
                 for c in range(code_min, code_max + 1):
@@ -601,7 +601,7 @@ def fetch_xml(url, ref_area):
 
                             if kind_str == 'wa':  f_wa = 1
                             elif kind_str == 'ww': f_ww = 1
-                            elif kind_str == 'wk': f_wk = 1
+                            elif kind_str == 'wuw': f_wuw = 1
                             elif kind_str == 'wew': f_wew = 1
                         ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str].get(code, '')},{status}"
                         ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
@@ -631,7 +631,7 @@ def fetch_xml(url, ref_area):
 
                         if kind_str == 'wa':  f_wa = 1
                         elif kind_str == 'ww': f_ww = 1
-                        elif kind_str == 'wk': f_wk = 1
+                        elif kind_str == 'wuw': f_wuw = 1
                         elif kind_str == 'wew': f_wew = 1
                         ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str][code]},{status}"
                         ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
@@ -640,19 +640,19 @@ def fetch_xml(url, ref_area):
             if f_wa:
                 if wa  and area[area_code_text][0]: acct[area[area_code_text][0]] = wa
                 if ewa and area[area_code_text][4]: acct[area[area_code_text][4]] = ewa
-                write_last(area_code_text, wa, ww, wk, wew, report_time)
+                write_last(area_code_text, wa, ww, wuw, wew, report_time)
             if f_ww:
                 if ww  and area[area_code_text][1]: acct[area[area_code_text][1]] = ww
                 if eww and area[area_code_text][5]: acct[area[area_code_text][5]] = eww
-                write_last(area_code_text, wa, ww, wk, wew, report_time)
-            if f_wk:
-                if wk  and area[area_code_text][2]: acct[area[area_code_text][2]] = wk
-                if ewk and area[area_code_text][6]: acct[area[area_code_text][6]] = ewk
-                write_last(area_code_text, wa, ww, wk, wew, report_time)
+                write_last(area_code_text, wa, ww, wuw, wew, report_time)
+            if f_wuw:
+                if wuw and area[area_code_text][2]: acct[area[area_code_text][2]] = wuw
+                if ewuw and area[area_code_text][6]: acct[area[area_code_text][6]] = ewuw
+                write_last(area_code_text, wa, ww, wuw, wew, report_time)
             if f_wew:
                 if wew  and area[area_code_text][3]: acct[area[area_code_text][3]] = wew
                 if ewew and area[area_code_text][7]: acct[area[area_code_text][7]] = ewew
-                write_last(area_code_text, wa, ww, wk, wew, report_time)
+                write_last(area_code_text, wa, ww, wuw, wew, report_time)
 
     return report_time, acct
 
@@ -676,15 +676,15 @@ STATUS_KEY = {
     'Continuation': 101,
     # 降格（高い順）
     '特別警報から危険警報': 2,              # L5→L4 ※2026年5月新設
-    'Emergency Warning to Danger Warning': 2,
+    'Emergency Warning to Urgent Warning': 2,
     '特別警報から警報': 3,                  # L5→L3
     'Emergency Warning to Warning': 3,
     '特別警報から注意報': 4,                # L5→L2
     'Emergency Warning to Advisory': 4,
     '危険警報から警報': 5,                  # L4→L3 ※2026年5月新設
-    'Danger Warning to Warning': 5,
+    'Urgent Warning to Warning': 5,
     '危険警報から注意報': 6,                # L4→L2 ※2026年5月新設
-    'Danger Warning to Advisory': 6,
+    'Urgent Warning to Advisory': 6,
     '警報から注意報': 7,                    # L3→L2
     'Warning to Advisory': 7,
     # 昇格（低い順）
@@ -693,11 +693,11 @@ STATUS_KEY = {
     '注意報から警報': 8,                    # rstatus: 警報が注意報から昇格
     'Advisory to Warning': 8,
     '危険警報へ変化': 9,                    # →L4 ※2026年5月新設
-    'Change to Danger Warning': 9,
+    'Change to Urgent Warning': 9,
     '注意報から危険警報': 9,               # rstatus: 危険警報が注意報から昇格 ※2026年5月新設
-    'Advisory to Danger Warning': 9,
+    'Advisory to Urgent Warning': 9,
     '警報から危険警報': 9,                  # rstatus: 危険警報が警報から昇格 ※2026年5月新設
-    'Warning to Danger Warning': 9,
+    'Warning to Urgent Warning': 9,
     '特別警報へ変化': 10,                   # →L5
     'Change to Emergency Warning': 10,
     '注意報から特別警報': 10,              # rstatus: 特別警報が注意報から昇格
@@ -705,7 +705,7 @@ STATUS_KEY = {
     '警報から特別警報': 10,                 # rstatus: 特別警報が警報から昇格
     'Warning to Emergency Warning': 10,
     '危険警報から特別警報': 10,             # rstatus: 特別警報が危険警報から昇格 ※2026年5月新設
-    'Danger Warning to Emergency Warning': 10,
+    'Urgent Warning to Emergency Warning': 10,
     # 解除・切り替え
     '解除': 11,
     'Cancel': 11,
@@ -713,7 +713,7 @@ STATUS_KEY = {
     'Cancel(to Advisory)': 12,
     '注意報に切り替え': 12,
     '危険警報に切り替え': 12,               # ※2026年5月新設
-    'Cancel(to Danger Warning)': 12,
+    'Cancel(to Urgent Warning)': 12,
     '解除(警報へ)': 13,
     'Cancel(to Warning)': 13,
     '警報に切り替え': 13,
