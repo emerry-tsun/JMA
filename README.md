@@ -47,6 +47,33 @@ The main Python script that:
 
 ---
 
+### `post_message.py`
+A script that posts specified messages to Bluesky Social accounts listed in a CSV file.
+
+#### Usage:
+```bash
+python3 post_message.py <input_csv>
+```
+
+#### Input CSV (command line argument):
+
+| Column | Description |
+|--------|-------------|
+| **Account** | Account name matching an entry in `post.csv`. |
+| **Message** | Message to post. Multi-line messages are supported (enclose in double quotes). |
+
+#### Example input CSV:
+```
+shinjuku_wa,"本日の天気は晴れです。
+気温は25度です。"
+shinagawa_ww,大雨警報が発令されました。
+```
+
+#### Credentials file (`post.csv` in current directory):
+Uses the same `post.csv` format as `jma.py`. The account name in the input CSV is matched against the first column of `post.csv` to retrieve the Bluesky username and password for authentication.
+
+---
+
 ## `area.csv`
 
 This file contains information about the areas to monitor and their posting configurations.
