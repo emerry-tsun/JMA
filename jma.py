@@ -18,10 +18,19 @@ DELAY_START = 20	# 処理開始を20秒待つ
 LOCK_TIMEOUT = 540	# ロックのタイムアウト
 URL_JMA_PULL = 'https://www.data.jma.go.jp/developer/xml/feed/extra.xml'
 XML_BASE = '{http://xml.kishou.go.jp/jmaxml1/}'
-ITEM_TITLE = '気象特別警報・警報・注意報'            # VPWW53/54 旧形式（移行期間中）
-ITEM_TITLE_R06 = '気象警報・注意報（Ｒ０６）'          # VPWW55-61 新形式（2026年5月以降）
+ITEM_TITLE = '気象特別警報・警報・注意報'            # VPWW53 旧形式（移行期間中〜2028年頃）
+ITEM_TITLE_R06 = '気象警報・注意報（Ｒ０６）'          # VPWW55-61 新形式プレフィックス（確認済）
+                                                        # 実タイトル例: '気象警報・注意報（Ｒ０６）（大雨）'
 WARNING_TYPE = '気象警報・注意報（市町村等）'           # VPWW54 旧形式
 WARNING_TYPE_R06 = '気象警報・注意報（Ｒ０６）（市町村等）' # VPWW55-61 新形式（要確認）
+# ─────────────────────────────────────────────────────────────────────────────
+# USE_LEGACY_FEED: フィード処理モードの切り替えフラグ
+#   True  … VPWW53/54 旧形式のみ処理（2026年5月29日より前）
+#   False … VPWW55-61 新形式のみ処理（2026年5月29日以降に False へ変更）
+#            ※ False にすると危険警報(L4)が捕捉できるようになる
+#            ※ True のままでは旧形式と新形式が二重処理され誤投稿の恐れあり
+# ─────────────────────────────────────────────────────────────────────────────
+USE_LEGACY_FEED = True
 NO_CHANGESTATUS = '変化無'
 FORM_URL_JMA_WARNING = 'https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code={}&lang={}'
 BASE_DIR = '/usr/local/emerry/jma/'
@@ -132,10 +141,14 @@ def check(feed):
     links = {}
 
     for item in feed.entries:
-        # VPWW53/54 旧形式: タイトルが '気象特別警報・警報・注意報'
-        # VPWW55-61 新形式: タイトルが '気象警報・注意報（Ｒ０６）（大雨）' 等
-        if item.title != ITEM_TITLE and not item.title.startswith(ITEM_TITLE_R06):
-            continue
+        # USE_LEGACY_FEED=True : VPWW53/54 旧形式のみ処理
+        # USE_LEGACY_FEED=False: VPWW55-61 新形式のみ処理（2026年5月29日以降）
+        if USE_LEGACY_FEED:
+            if item.title != ITEM_TITLE:
+                continue
+        else:
+            if not item.title.startswith(ITEM_TITLE_R06):
+                continue
         for p_name, area_codes in pref.items():
             for a_code in area_codes:
                 if p_name in item.description:
@@ -492,8 +505,11 @@ def fetch_xml(url, ref_area):
 
     for warn_elem in warning:
         warn_type = warn_elem.get('type')
-        # 市区町村タイプだけ処理（VPWW54旧形式 および VPWW55-61新形式の両方に対応）
-        if warn_type != WARNING_TYPE and warn_type != WARNING_TYPE_R06:
+        # 市区町村タイプだけ処理
+        # 旧形式: WARNING_TYPE = '気象警報・注意報（市町村等）'
+        # 新形式: WARNING_TYPE_R06（要確認）または旧形式と同値の可能性あり
+        accepted_types = {WARNING_TYPE} if USE_LEGACY_FEED else {WARNING_TYPE, WARNING_TYPE_R06}
+        if warn_type not in accepted_types:
             continue
         item = find_element_list_by_tag(warn_elem, 'Item')
         for item_elem in item:                          # 市区町村のループ
@@ -508,7 +524,10 @@ def fetch_xml(url, ref_area):
             if 'time' in ref_last:
                 if report_time < ref_last['time']:
                     continue
-                elif report_time == ref_last['time']:
+                elif report_time == ref_last['time'] and USE_LEGACY_FEED:
+                    # 旧形式(VPWW54)は1イベント=1電文なので同一タイムスタンプはスキップ
+                    # 新形式(VPWW55-61)はカテゴリ別に複数電文が同一タイムスタンプで配信される
+                    # ため、USE_LEGACY_FEED=False 時はスキップしない
                     continue
 
             current = {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}
