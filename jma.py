@@ -30,7 +30,7 @@ WARNING_TYPE_R06 = '気象警報・注意報（Ｒ０６）（市町村等）' #
 #            ※ False にすると危険警報(L4)が捕捉できるようになる
 #            ※ True のままでは旧形式と新形式が二重処理され誤投稿の恐れあり
 # ─────────────────────────────────────────────────────────────────────────────
-USE_LEGACY_FEED = True
+USE_LEGACY_FEED = False
 NO_CHANGESTATUS = '変化無'
 FORM_URL_JMA_WARNING = 'https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code={}&lang={}'
 BASE_DIR = '/usr/local/emerry/jma/'
