@@ -531,6 +531,9 @@ def fetch_xml(url, ref_area):
                     continue
 
             current = {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}
+            # 新形式(VPWW55-61): 電文ごとに担当コードが異なる（例: VPWW58=暴風系、VPWW59=波浪系）
+            # 本電文に記載のないコードは「担当外」であり、lastにあっても解除と誤判定しないために追跡する
+            mentioned = {'wa': set(), 'ww': set(), 'wuw': set(), 'wew': set()}
             kind = find_element_list_by_tag(item_elem, 'Kind')
             for kind_elem in kind:                      # 各注意報、警報、危険警報、特別警報
                 try:
@@ -540,6 +543,16 @@ def fetch_xml(url, ref_area):
                     kind_elem_condition = find_element_by_tag(kind_elem, ['Condition']).text.strip()
                 except:                                 # Codeが空の場合
                     continue
+                code_str = f"{kind_elem_code:02d}"
+                # 解除含む全コードを「本電文の管轄コード」として記録
+                if 10 <= kind_elem_code < 30:
+                    mentioned['wa'].add(code_str)
+                elif 2 <= kind_elem_code < 10:
+                    mentioned['ww'].add(code_str)
+                elif 40 <= kind_elem_code < 50:
+                    mentioned['wuw'].add(code_str)
+                elif 30 <= kind_elem_code < 40:
+                    mentioned['wew'].add(code_str)
                 if kind_elem_status == '解除':
                     continue
                 condition = ""                          # 付帯条件
@@ -550,13 +563,13 @@ def fetch_xml(url, ref_area):
                     condition = kind_elem_condition
                 # コード範囲で種別を振り分け
                 if 10 <= kind_elem_code < 30:           # 注意報 (L2)
-                    current['wa'][f"{kind_elem_code:02d}"] = condition
+                    current['wa'][code_str] = condition
                 elif 2 <= kind_elem_code < 10:          # 警報 (L3)
-                    current['ww'][f"{kind_elem_code:02d}"] = condition
+                    current['ww'][code_str] = condition
                 elif 40 <= kind_elem_code < 50:         # 危険警報 (L4) ※2026年5月新設
-                    current['wuw'][f"{kind_elem_code:02d}"] = condition
+                    current['wuw'][code_str] = condition
                 elif 30 <= kind_elem_code < 40:         # 特別警報 (L5)
-                    current['wew'][f"{kind_elem_code:02d}"] = condition
+                    current['wew'][code_str] = condition
 
             wa = {}; ww = {}; wuw = {}; wew = {}
             ewa = {}; eww = {}; ewuw = {}; ewew = {}
@@ -595,6 +608,11 @@ def fetch_xml(url, ref_area):
                         if code in current[kind_str]:
                             status = '継続'
                         else:
+                            # 新形式(VPWW55-61): 本電文の管轄外コードは現状維持（別電文が管理）
+                            # 例: VPWW59(波浪)処理中に強風(15)がlastにあっても解除と誤判定しない
+                            if not USE_LEGACY_FEED and code not in mentioned[kind_str]:
+                                ref_kind_out[code] = f"{code_kind.get(code, code)},継続"
+                                continue
                             # 今回は別の種別/解除 → 遷移先を特定（昇格→降格の順で確認）
                             key   = ref_to_up.get(code)   if ref_to_up   else None
                             key2  = ref_to_up2.get(code)  if ref_to_up2  else None
