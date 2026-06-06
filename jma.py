@@ -661,19 +661,34 @@ def compare_and_post(area_code_text, report_time, current, responsible, ref_last
                 ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
 
     # area[area_code_text] = [ja_wa, ja_ww, ja_wuw, ja_wew, en_wa, en_ww, en_wuw, en_wew]
+    # 担当外コードは last ファイルには保持するが、投稿には含めない
+    # （last ファイル書き込みは wa/ww/wuw/wew をそのまま使用）
+    def _filter_responsible(d, kind_key):
+        if responsible is None:
+            return d
+        return {c: v for c, v in d.items() if c in responsible[kind_key]}
+
     acct = {}
     if f_wa:
-        if wa  and area[area_code_text][0]: acct[area[area_code_text][0]] = wa
-        if ewa and area[area_code_text][4]: acct[area[area_code_text][4]] = ewa
+        post_wa  = _filter_responsible(wa,  'wa')
+        post_ewa = _filter_responsible(ewa, 'wa')
+        if post_wa  and area[area_code_text][0]: acct[area[area_code_text][0]] = post_wa
+        if post_ewa and area[area_code_text][4]: acct[area[area_code_text][4]] = post_ewa
     if f_ww:
-        if ww  and area[area_code_text][1]: acct[area[area_code_text][1]] = ww
-        if eww and area[area_code_text][5]: acct[area[area_code_text][5]] = eww
+        post_ww  = _filter_responsible(ww,  'ww')
+        post_eww = _filter_responsible(eww, 'ww')
+        if post_ww  and area[area_code_text][1]: acct[area[area_code_text][1]] = post_ww
+        if post_eww and area[area_code_text][5]: acct[area[area_code_text][5]] = post_eww
     if f_wuw:
-        if wuw and area[area_code_text][2]: acct[area[area_code_text][2]] = wuw
-        if ewuw and area[area_code_text][6]: acct[area[area_code_text][6]] = ewuw
+        post_wuw  = _filter_responsible(wuw,  'wuw')
+        post_ewuw = _filter_responsible(ewuw, 'wuw')
+        if post_wuw  and area[area_code_text][2]: acct[area[area_code_text][2]] = post_wuw
+        if post_ewuw and area[area_code_text][6]: acct[area[area_code_text][6]] = post_ewuw
     if f_wew:
-        if wew and area[area_code_text][3]: acct[area[area_code_text][3]] = wew
-        if ewew and area[area_code_text][7]: acct[area[area_code_text][7]] = ewew
+        post_wew  = _filter_responsible(wew,  'wew')
+        post_ewew = _filter_responsible(ewew, 'wew')
+        if post_wew  and area[area_code_text][3]: acct[area[area_code_text][3]] = post_wew
+        if post_ewew and area[area_code_text][7]: acct[area[area_code_text][7]] = post_ewew
     if f_wa or f_ww or f_wuw or f_wew:
         write_last(area_code_text, wa, ww, wuw, wew, report_time)
     return acct
