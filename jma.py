@@ -116,16 +116,16 @@ def read_area():
                 pref_t.setdefault(p_name, []).append(a_code)
                 area[a_code] = tmp
                 # acct_area
-                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報(Level 2)',  'tag': tag}
-                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報(Level 3)',    'tag': tag}
+                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報',  'tag': tag}
+                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報',    'tag': tag}
                 if acct_wuw:
-                    acct_area[acct_wuw] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報(Level 4)', 'tag': tag}
-                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報(Level 5)', 'tag': tag}
-                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory(Level 2)',        'tag': tag_e}
-                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning(Level 3)',         'tag': tag_e}
+                    acct_area[acct_wuw] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報', 'tag': tag}
+                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報', 'tag': tag}
+                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory',        'tag': tag_e}
+                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning',         'tag': tag_e}
                 if acct_ewuw:
-                    acct_area[acct_ewuw] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Urgent Warning(Level 4)', 'tag': tag_e}
-                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning(Level 5)', 'tag': tag_e}
+                    acct_area[acct_ewuw] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Urgent Warning', 'tag': tag_e}
+                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning', 'tag': tag_e}
     except (FileNotFoundError, IOError) as e:
         syslog.syslog(syslog.LOG_ERR, f": File {AREA_CSV}: {e}")
 
@@ -743,6 +743,17 @@ STATUS_KEY = {
     'なし': -1,
     'None': -1
 }
+# grade → 警戒レベル表記の対応
+GRADE_LEVEL = {
+    '注意報': 'Level 2',
+    '警報': 'Level 3',
+    '危険警報': 'Level 4',
+    '特別警報': 'Level 5',
+    'Advisory': 'Level 2',
+    'Warning': 'Level 3',
+    'Urgent Warning': 'Level 4',
+    'Emergency Warning': 'Level 5',
+}
 def post_by_acct(report_datetime, acct, ref_code_status):
     ja = acct_area[acct]['lang'] == 'ja'
 
@@ -760,7 +771,8 @@ def post_by_acct(report_datetime, acct, ref_code_status):
             kind_str[key] = kind_str.get(key, '') + delimiter + name
             status[key] = st
 
-    mssg = f'【{acct_area[acct]["name"]}：{acct_area[acct]["grade"]}】\n' if ja else f'% {acct_area[acct]["name"]} : {acct_area[acct]["grade"]} %\n'
+    grade_level = f'{acct_area[acct]["grade"]}({GRADE_LEVEL.get(acct_area[acct]["grade"], "")})'
+    mssg = f'【{acct_area[acct]["name"]}：{grade_level}】\n' if ja else f'% {acct_area[acct]["name"]} : {grade_level} %\n'
 
     for k in sorted(status.keys()):
         if k < 0:
