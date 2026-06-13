@@ -31,6 +31,21 @@ WARNING_TYPE_R06 = '気象警報・注意報（Ｒ０６）（市町村等）' #
 #            ※ True のままでは旧形式と新形式が二重処理され誤投稿の恐れあり
 # ─────────────────────────────────────────────────────────────────────────────
 USE_LEGACY_FEED = False
+# ─────────────────────────────────────────────────────────────────────────────
+# VPWW55-61 電文種別ごとの担当コードマッピング
+# 各電文は自担当カテゴリのコードのみ記載するため、別電文担当コードの
+# 誤解除・誤遷移検知を防ぐために使用する（USE_LEGACY_FEED=False 時のみ参照）
+# ─────────────────────────────────────────────────────────────────────────────
+VPWW_RESPONSIBLE = {
+    'VPWW55': {'wa': {'10'},               'ww': {'03'},       'wuw': {'43'},       'wew': {'33'}},
+    'VPWW56': {'wa': {'29'},               'ww': {'09'},       'wuw': {'49'},       'wew': set()},
+    'VPWW57': {'wa': {'19'},               'ww': {'08'},       'wuw': {'48'},       'wew': {'38'}},
+    'VPWW58': {'wa': {'13', '15'},         'ww': {'02', '05'}, 'wuw': set(),        'wew': {'32', '35'}},
+    'VPWW59': {'wa': {'16'},               'ww': {'07'},       'wuw': set(),        'wew': {'37'}},
+    'VPWW60': {'wa': {'12', '13'},         'ww': {'02', '06'}, 'wuw': set(),        'wew': {'32', '36'}},
+    'VPWW61': {'wa': {'14', '17', '18', '20', '21', '22', '23', '24', '25', '26', '27'},
+               'ww': set(), 'wuw': set(), 'wew': set()},
+}
 NO_CHANGESTATUS = '変化無'
 FORM_URL_JMA_WARNING = 'https://www.jma.go.jp/bosai/warning/#area_type=class20s&area_code={}&lang={}'
 BASE_DIR = '/usr/local/emerry/jma/'
@@ -101,16 +116,16 @@ def read_area():
                 pref_t.setdefault(p_name, []).append(a_code)
                 area[a_code] = tmp
                 # acct_area
-                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報(Level 2)',  'tag': tag}
-                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報(Level 3)',    'tag': tag}
+                acct_area[acct_wa]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '注意報',  'tag': tag}
+                acct_area[acct_ww]  = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '警報',    'tag': tag}
                 if acct_wuw:
-                    acct_area[acct_wuw] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報(Level 4)', 'tag': tag}
-                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報(Level 5)', 'tag': tag}
-                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory(Level 2)',        'tag': tag_e}
-                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning(Level 3)',         'tag': tag_e}
+                    acct_area[acct_wuw] = {'lang': 'ja', 'code': a_code, 'name': name, 'grade': '危険警報', 'tag': tag}
+                acct_area[acct_wew] = {'lang': 'ja', 'code': a_code, 'name': name,   'grade': '特別警報', 'tag': tag}
+                acct_area[acct_ewa] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Advisory',        'tag': tag_e}
+                acct_area[acct_eww] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Warning',         'tag': tag_e}
                 if acct_ewuw:
-                    acct_area[acct_ewuw] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Urgent Warning(Level 4)', 'tag': tag_e}
-                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning(Level 5)', 'tag': tag_e}
+                    acct_area[acct_ewuw] = {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Urgent Warning', 'tag': tag_e}
+                acct_area[acct_ewew]= {'lang': 'en', 'code': a_code, 'name': name_e, 'grade': 'Emergency Warning', 'tag': tag_e}
     except (FileNotFoundError, IOError) as e:
         syslog.syslog(syslog.LOG_ERR, f": File {AREA_CSV}: {e}")
 
@@ -482,216 +497,186 @@ def find_element_list_by_tag(data, tag):
 #	}
 #
 
-def fetch_xml(url, ref_area):
+def extract_vpww_type(url):
+    """URLからVPWW電文種別を抽出する（例: 'VPWW58'）。不明な場合は None を返す。"""
+    m = re.search(r'_(VPWW\d+)_', url)
+    return m.group(1) if m else None
+
+
+def collect_xml(url, ref_area):
+    """XMLを解析し、{area_code_text: (report_time, current_state)} を返す。
+    report_time が前回処理済みのエリアは除外する（軽量スキップ）。
+    """
     response = requests.get(url)
     if response.status_code != 200:
         syslog.syslog(syslog.LOG_ERR, f"Failed to fetch XML from {url}. Status code: {response.status_code}")
-        return None
+        return {}
 
     root = ET.fromstring(response.content)
     report_datetime = find_element_by_tag(root, ['Report', 'Head', 'ReportDateTime'])
+    body            = find_element_by_tag(root, ['Report', 'Body'])
+    warning         = find_element_list_by_tag(body, 'Warning')
 
-    body = find_element_by_tag(root, ['Report', 'Body'])
-
-    warning = find_element_list_by_tag(body, 'Warning')
-
-    acct = {}
     report_time = 0
-
     match = re.match(r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\+09:00$', report_datetime.text)
     if match:
         year, month, day, hour, minute, second = map(int, match.groups())
         report_time = int(datetime(year, month, day, hour, minute, second).timestamp())
 
-    for warn_elem in warning:
-        warn_type = warn_elem.get('type')
-        # 市区町村タイプだけ処理
-        # 旧形式: WARNING_TYPE = '気象警報・注意報（市町村等）'
-        # 新形式: WARNING_TYPE_R06（要確認）または旧形式と同値の可能性あり
-        accepted_types = {WARNING_TYPE} if USE_LEGACY_FEED else {WARNING_TYPE, WARNING_TYPE_R06}
-        if warn_type not in accepted_types:
-            continue
-        item = find_element_list_by_tag(warn_elem, 'Item')
-        for item_elem in item:                          # 市区町村のループ
-            area_code_text = find_element_by_tag(item_elem, ['Area', 'Code']).text
+    result = {}
+    accepted_types = {WARNING_TYPE} if USE_LEGACY_FEED else {WARNING_TYPE, WARNING_TYPE_R06}
 
+    for warn_elem in warning:
+        if warn_elem.get('type') not in accepted_types:
+            continue
+        for item_elem in find_element_list_by_tag(warn_elem, 'Item'):
+            area_code_text = find_element_by_tag(item_elem, ['Area', 'Code']).text
             if area_code_text not in ref_area:
                 continue
 
-            area_code = int(area_code_text)
-            ref_last = read_last(area_code)             # 前回情報取得
-
-            if 'time' in ref_last:
-                if report_time < ref_last['time']:
+            # 古い report_time はスキップ（旧形式では同一タイムスタンプもスキップ）
+            ref_last_t = read_last(int(area_code_text))
+            if 'time' in ref_last_t:
+                if report_time < ref_last_t['time']:
                     continue
-                elif report_time == ref_last['time'] and USE_LEGACY_FEED:
-                    # 旧形式(VPWW54)は1イベント=1電文なので同一タイムスタンプはスキップ
-                    # 新形式(VPWW55-61)はカテゴリ別に複数電文が同一タイムスタンプで配信される
-                    # ため、USE_LEGACY_FEED=False 時はスキップしない
+                if report_time == ref_last_t['time'] and USE_LEGACY_FEED:
                     continue
 
             current = {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}
-            # 新形式(VPWW55-61): 電文ごとに担当コードが異なる（例: VPWW58=暴風系、VPWW59=波浪系）
-            # 本電文に記載のないコードは「担当外」であり、lastにあっても解除と誤判定しないために追跡する
-            mentioned = {'wa': set(), 'ww': set(), 'wuw': set(), 'wew': set()}
-            kind = find_element_list_by_tag(item_elem, 'Kind')
-            for kind_elem in kind:                      # 各注意報、警報、危険警報、特別警報
+            for kind_elem in find_element_list_by_tag(item_elem, 'Kind'):
                 try:
-                    kind_elem_code = int(find_element_by_tag(kind_elem, ['Code']).text)
-                    kind_elem_name = find_element_by_tag(kind_elem, ['Name']).text
+                    kind_elem_code   = int(find_element_by_tag(kind_elem, ['Code']).text)
                     kind_elem_status = find_element_by_tag(kind_elem, ['Status']).text
-                    kind_elem_condition = find_element_by_tag(kind_elem, ['Condition']).text.strip()
-                except:                                 # Codeが空の場合
+                    condition        = find_element_by_tag(kind_elem, ['Condition']).text.strip()
+                except:
                     continue
-                code_str = f"{kind_elem_code:02d}"
-                # 解除含む全コードを「本電文の管轄コード」として記録
-                if 10 <= kind_elem_code < 30:
-                    mentioned['wa'].add(code_str)
-                elif 2 <= kind_elem_code < 10:
-                    mentioned['ww'].add(code_str)
-                elif 40 <= kind_elem_code < 50:
-                    mentioned['wuw'].add(code_str)
-                elif 30 <= kind_elem_code < 40:
-                    mentioned['wew'].add(code_str)
                 if kind_elem_status == '解除':
                     continue
-                condition = ""                          # 付帯条件
-                if isinstance(kind_elem.get('Condition'), list):
-                    ref_cond = kind_elem['Condition']
-                    condition += '(' + ','.join(ref_cond) + ')'
+                code_str = f"{kind_elem_code:02d}"
+                if   10 <= kind_elem_code < 30: current['wa' ][code_str] = condition
+                elif  2 <= kind_elem_code < 10: current['ww' ][code_str] = condition
+                elif 40 <= kind_elem_code < 50: current['wuw'][code_str] = condition
+                elif 30 <= kind_elem_code < 40: current['wew'][code_str] = condition
+
+            result[area_code_text] = (report_time, current)
+
+    return result
+
+
+def compare_and_post(area_code_text, report_time, current, responsible, ref_last):
+    """集約された current を ref_last と比較し、変化があれば last を更新して acct dict を返す。
+
+    responsible: {wa, ww, wuw, wew} それぞれの担当コード set（新形式時）
+                 None = 旧形式（全コードが担当対象）
+    """
+    wa = {}; ww = {}; wuw = {}; wew = {}
+    ewa = {}; eww = {}; ewuw = {}; ewew = {}
+    f_wa = 0; f_ww = 0; f_wuw = 0; f_wew = 0
+
+    # 種別のループ（wa=注意報L2, ww=警報L3, wuw=危険警報L4, wew=特別警報L5）
+    for kind_str in ['wa', 'ww', 'wuw', 'wew']:
+        code_min       = {'wa': 10, 'ww':  2, 'wuw': 40, 'wew': 30}[kind_str]
+        code_max       = {'wa': 29, 'ww':  9, 'wuw': 49, 'wew': 39}[kind_str]
+        kind_down_str  = {'wa': None, 'ww': 'wa',  'wuw': 'ww',  'wew': 'wuw'}[kind_str]
+        kind_down2_str = {'wa': None, 'ww': None,  'wuw': 'wa',  'wew': 'ww' }[kind_str]
+        kind_down3_str = {'wa': None, 'ww': None,  'wuw': None,  'wew': 'wa' }[kind_str]
+        kind_up_str    = {'wa': 'ww', 'ww': 'wuw', 'wuw': 'wew', 'wew': None}[kind_str]
+        kind_up2_str   = {'wa': 'wuw','ww': 'wew', 'wuw': None,  'wew': None}[kind_str]
+        kind_up3_str   = {'wa': 'wew','ww': None,  'wuw': None,  'wew': None}[kind_str]
+        ref_to_down    = {'wa': {},    'ww': ww_wa,  'wuw': wuw_ww,  'wew': wew_wuw}[kind_str]
+        ref_to_down2   = {'wa': {},    'ww': {},     'wuw': wuw_wa,  'wew': wew_ww }[kind_str]
+        ref_to_down3   = {'wa': {},    'ww': {},     'wuw': {},      'wew': wew_wa }[kind_str]
+        ref_to_up      = {'wa': wa_ww, 'ww': ww_wuw, 'wuw': wuw_wew,'wew': {}     }[kind_str]
+        ref_to_up2     = {'wa': wa_wuw,'ww': ww_wew, 'wuw': {},     'wew': {}     }[kind_str]
+        ref_to_up3     = {'wa': wa_wew,'ww': {},     'wuw': {},     'wew': {}     }[kind_str]
+        ref_kind_out   = {'wa': wa,  'ww': ww,  'wuw': wuw, 'wew': wew }[kind_str]
+        ref_kind_out_e = {'wa': ewa, 'ww': eww, 'wuw': ewuw,'wew': ewew}[kind_str]
+
+        for c in range(code_min, code_max + 1):
+            code = f"{c:02d}"
+            if code in ref_last.get(kind_str, {}):
+                # 前回このコードが発表されていた
+                if code in current[kind_str]:
+                    status = '継続'
                 else:
-                    condition = kind_elem_condition
-                # コード範囲で種別を振り分け
-                if 10 <= kind_elem_code < 30:           # 注意報 (L2)
-                    current['wa'][code_str] = condition
-                elif 2 <= kind_elem_code < 10:          # 警報 (L3)
-                    current['ww'][code_str] = condition
-                elif 40 <= kind_elem_code < 50:         # 危険警報 (L4) ※2026年5月新設
-                    current['wuw'][code_str] = condition
-                elif 30 <= kind_elem_code < 40:         # 特別警報 (L5)
-                    current['wew'][code_str] = condition
+                    # 担当外コードは現状維持（別電文が管理）
+                    # responsible=None の旧形式では全コードが担当対象
+                    if responsible is not None and code not in responsible[kind_str]:
+                        ref_kind_out[code] = f"{code_kind.get(code, code)},継続"
+                        continue
+                    # 遷移先を特定（昇格→降格の順で確認）
+                    key   = ref_to_up.get(code)    if ref_to_up   else None
+                    key2  = ref_to_up2.get(code)   if ref_to_up2  else None
+                    key3  = ref_to_up3.get(code)   if ref_to_up3  else None
+                    keyd  = ref_to_down.get(code)  if ref_to_down  else None
+                    keyd2 = ref_to_down2.get(code) if ref_to_down2 else None
+                    keyd3 = ref_to_down3.get(code) if ref_to_down3 else None
+                    if   kind_up_str   and current.get(kind_up_str)   and key   is not None and key   in current[kind_up_str]:
+                        status = ref_to_up['status']
+                    elif kind_up2_str  and current.get(kind_up2_str)  and key2  is not None and key2  in current[kind_up2_str]:
+                        status = ref_to_up2['status']
+                    elif kind_up3_str  and current.get(kind_up3_str)  and key3  is not None and key3  in current[kind_up3_str]:
+                        status = ref_to_up3['status']
+                    elif kind_down_str  and current.get(kind_down_str)  and keyd  is not None and keyd  in current[kind_down_str]:
+                        status = ref_to_down['status']
+                    elif kind_down2_str and current.get(kind_down2_str) and keyd2 is not None and keyd2 in current[kind_down2_str]:
+                        status = ref_to_down2['status']
+                    elif kind_down3_str and current.get(kind_down3_str) and keyd3 is not None and keyd3 in current[kind_down3_str]:
+                        status = ref_to_down3['status']
+                    else:
+                        status = '解除'
+                    if   kind_str == 'wa':  f_wa  = 1
+                    elif kind_str == 'ww':  f_ww  = 1
+                    elif kind_str == 'wuw': f_wuw = 1
+                    elif kind_str == 'wew': f_wew = 1
+                ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str].get(code, '')},{status}"
+                ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
+            elif code in current[kind_str]:
+                # 今回新たにこのコードが発表された → 遷移元を特定
+                key   = ref_to_up.get(code)    if ref_to_up   else None
+                key2  = ref_to_up2.get(code)   if ref_to_up2  else None
+                key3  = ref_to_up3.get(code)   if ref_to_up3  else None
+                keyd  = ref_to_down.get(code)  if ref_to_down  else None
+                keyd2 = ref_to_down2.get(code) if ref_to_down2 else None
+                keyd3 = ref_to_down3.get(code) if ref_to_down3 else None
+                if   kind_up_str   and ref_last.get(kind_up_str,   {}) and key   is not None and key   in ref_last[kind_up_str]:
+                    status = ref_to_up['rstatus']
+                elif kind_up2_str  and ref_last.get(kind_up2_str,  {}) and key2  is not None and key2  in ref_last[kind_up2_str]:
+                    status = ref_to_up2['rstatus']
+                elif kind_up3_str  and ref_last.get(kind_up3_str,  {}) and key3  is not None and key3  in ref_last[kind_up3_str]:
+                    status = ref_to_up3['rstatus']
+                elif kind_down_str  and ref_last.get(kind_down_str,  {}) and keyd  is not None and keyd  in ref_last[kind_down_str]:
+                    status = ref_to_down['rstatus']
+                elif kind_down2_str and ref_last.get(kind_down2_str, {}) and keyd2 is not None and keyd2 in ref_last[kind_down2_str]:
+                    status = ref_to_down2['rstatus']
+                elif kind_down3_str and ref_last.get(kind_down3_str, {}) and keyd3 is not None and keyd3 in ref_last[kind_down3_str]:
+                    status = ref_to_down3['rstatus']
+                else:
+                    status = '発表'
+                if   kind_str == 'wa':  f_wa  = 1
+                elif kind_str == 'ww':  f_ww  = 1
+                elif kind_str == 'wuw': f_wuw = 1
+                elif kind_str == 'wew': f_wew = 1
+                ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str][code]},{status}"
+                ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
 
-            wa = {}; ww = {}; wuw = {}; wew = {}
-            ewa = {}; eww = {}; ewuw = {}; ewew = {}
-            f_wa = 0                                    # 「継続」以外→1
-            f_ww = 0
-            f_wuw = 0
-            f_wew = 0
-
-            # 種別のループ（wa=注意報L2, ww=警報L3, wuw=危険警報L4, wew=特別警報L5）
-            for kind_str in ['wa', 'ww', 'wuw', 'wew']:
-                # コード範囲
-                code_min = {'wa': 10, 'ww': 2,  'wuw': 40, 'wew': 30}[kind_str]
-                code_max = {'wa': 29, 'ww': 9,  'wuw': 49, 'wew': 39}[kind_str]
-                # 隣接1段階の遷移先
-                kind_down_str  = {'wa': None,  'ww': 'wa', 'wuw': 'ww',  'wew': 'wuw' }[kind_str]
-                kind_down2_str = {'wa': None,  'ww': None, 'wuw': 'wa',  'wew': 'ww' }[kind_str]
-                kind_down3_str = {'wa': None,  'ww': None, 'wuw': None,  'wew': 'wa' }[kind_str]
-                kind_up_str    = {'wa': 'ww',  'ww': 'wuw', 'wuw': 'wew', 'wew': None }[kind_str]
-                kind_up2_str   = {'wa': 'wuw',  'ww': 'wew','wuw': None,  'wew': None }[kind_str]
-                kind_up3_str   = {'wa': 'wew', 'ww': None, 'wuw': None,  'wew': None }[kind_str]
-                # 遷移マッピング辞書
-                ref_to_down  = {'wa': {},     'ww': ww_wa,  'wuw': wuw_ww,  'wew': wew_wuw}[kind_str]
-                ref_to_down2 = {'wa': {},     'ww': {},     'wuw': wuw_wa,  'wew': wew_ww}[kind_str]
-                ref_to_down3 = {'wa': {},     'ww': {},     'wuw': {},     'wew': wew_wa}[kind_str]
-                ref_to_up    = {'wa': wa_ww,  'ww': ww_wuw,  'wuw': wuw_wew, 'wew': {}   }[kind_str]
-                ref_to_up2   = {'wa': wa_wuw,  'ww': ww_wew, 'wuw': {},     'wew': {}   }[kind_str]
-                ref_to_up3   = {'wa': wa_wew, 'ww': {},     'wuw': {},     'wew': {}   }[kind_str]
-                ref_kind_out   = {'wa': wa,  'ww': ww,  'wuw': wuw, 'wew': wew }[kind_str]
-                ref_kind_out_e = {'wa': ewa, 'ww': eww, 'wuw': ewuw, 'wew': ewew}[kind_str]
-
-                # 種別に属するCodeのループ
-                for c in range(code_min, code_max + 1):
-                    code = f"{c:02d}"
-                    if code in ref_last.get(kind_str, {}):
-                        # 前回このコードが発表されていた
-                        if code in current[kind_str]:
-                            status = '継続'
-                        else:
-                            # 新形式(VPWW55-61): 本電文の管轄外コードは現状維持（別電文が管理）
-                            # 例: VPWW59(波浪)処理中に強風(15)がlastにあっても解除と誤判定しない
-                            if not USE_LEGACY_FEED and code not in mentioned[kind_str]:
-                                ref_kind_out[code] = f"{code_kind.get(code, code)},継続"
-                                continue
-                            # 今回は別の種別/解除 → 遷移先を特定（昇格→降格の順で確認）
-                            key   = ref_to_up.get(code)   if ref_to_up   else None
-                            key2  = ref_to_up2.get(code)  if ref_to_up2  else None
-                            key3  = ref_to_up3.get(code)  if ref_to_up3  else None
-                            keyd  = ref_to_down.get(code) if ref_to_down else None
-                            keyd2 = ref_to_down2.get(code)if ref_to_down2 else None
-                            keyd3 = ref_to_down3.get(code)if ref_to_down3 else None
-
-                            if kind_up_str  and current.get(kind_up_str)  and key  is not None and key  in current[kind_up_str]:
-                                status = ref_to_up['status']
-                            elif kind_up2_str and current.get(kind_up2_str) and key2 is not None and key2 in current[kind_up2_str]:
-                                status = ref_to_up2['status']
-                            elif kind_up3_str and current.get(kind_up3_str) and key3 is not None and key3 in current[kind_up3_str]:
-                                status = ref_to_up3['status']
-                            elif kind_down_str  and current.get(kind_down_str)  and keyd  is not None and keyd  in current[kind_down_str]:
-                                status = ref_to_down['status']
-                            elif kind_down2_str and current.get(kind_down2_str) and keyd2 is not None and keyd2 in current[kind_down2_str]:
-                                status = ref_to_down2['status']
-                            elif kind_down3_str and current.get(kind_down3_str) and keyd3 is not None and keyd3 in current[kind_down3_str]:
-                                status = ref_to_down3['status']
-                            else:
-                                status = '解除'
-
-                            if kind_str == 'wa':  f_wa = 1
-                            elif kind_str == 'ww': f_ww = 1
-                            elif kind_str == 'wuw': f_wuw = 1
-                            elif kind_str == 'wew': f_wew = 1
-                        ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str].get(code, '')},{status}"
-                        ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
-                    elif code in current[kind_str]:
-                        # 今回新たにこのコードが発表された → 遷移元を特定
-                        key   = ref_to_up.get(code)   if ref_to_up   else None
-                        key2  = ref_to_up2.get(code)  if ref_to_up2  else None
-                        key3  = ref_to_up3.get(code)  if ref_to_up3  else None
-                        keyd  = ref_to_down.get(code) if ref_to_down else None
-                        keyd2 = ref_to_down2.get(code)if ref_to_down2 else None
-                        keyd3 = ref_to_down3.get(code)if ref_to_down3 else None
-
-                        if kind_up_str  and ref_last.get(kind_up_str,  {}) and key  is not None and key  in ref_last[kind_up_str]:
-                            status = ref_to_up['rstatus']
-                        elif kind_up2_str and ref_last.get(kind_up2_str, {}) and key2 is not None and key2 in ref_last[kind_up2_str]:
-                            status = ref_to_up2['rstatus']
-                        elif kind_up3_str and ref_last.get(kind_up3_str, {}) and key3 is not None and key3 in ref_last[kind_up3_str]:
-                            status = ref_to_up3['rstatus']
-                        elif kind_down_str  and ref_last.get(kind_down_str,  {}) and keyd  is not None and keyd  in ref_last[kind_down_str]:
-                            status = ref_to_down['rstatus']
-                        elif kind_down2_str and ref_last.get(kind_down2_str, {}) and keyd2 is not None and keyd2 in ref_last[kind_down2_str]:
-                            status = ref_to_down2['rstatus']
-                        elif kind_down3_str and ref_last.get(kind_down3_str, {}) and keyd3 is not None and keyd3 in ref_last[kind_down3_str]:
-                            status = ref_to_down3['rstatus']
-                        else:
-                            status = '発表'
-
-                        if kind_str == 'wa':  f_wa = 1
-                        elif kind_str == 'ww': f_ww = 1
-                        elif kind_str == 'wuw': f_wuw = 1
-                        elif kind_str == 'wew': f_wew = 1
-                        ref_kind_out[code]   = f"{code_kind[code]}{current[kind_str][code]},{status}"
-                        ref_kind_out_e[code] = f"{code_kind_e[code]},{status_ja_en[status]}"
-
-            # area[area_code_text] = [ja_wa, ja_ww, ja_wk, ja_wew, en_wa, en_ww, en_wk, en_wew]
-            if f_wa:
-                if wa  and area[area_code_text][0]: acct[area[area_code_text][0]] = wa
-                if ewa and area[area_code_text][4]: acct[area[area_code_text][4]] = ewa
-                write_last(area_code_text, wa, ww, wuw, wew, report_time)
-            if f_ww:
-                if ww  and area[area_code_text][1]: acct[area[area_code_text][1]] = ww
-                if eww and area[area_code_text][5]: acct[area[area_code_text][5]] = eww
-                write_last(area_code_text, wa, ww, wuw, wew, report_time)
-            if f_wuw:
-                if wuw and area[area_code_text][2]: acct[area[area_code_text][2]] = wuw
-                if ewuw and area[area_code_text][6]: acct[area[area_code_text][6]] = ewuw
-                write_last(area_code_text, wa, ww, wuw, wew, report_time)
-            if f_wew:
-                if wew  and area[area_code_text][3]: acct[area[area_code_text][3]] = wew
-                if ewew and area[area_code_text][7]: acct[area[area_code_text][7]] = ewew
-                write_last(area_code_text, wa, ww, wuw, wew, report_time)
-
-    return report_time, acct
+    # area[area_code_text] = [ja_wa, ja_ww, ja_wuw, ja_wew, en_wa, en_ww, en_wuw, en_wew]
+    acct = {}
+    if f_wa:
+        if wa  and area[area_code_text][0]: acct[area[area_code_text][0]] = wa
+        if ewa and area[area_code_text][4]: acct[area[area_code_text][4]] = ewa
+    if f_ww:
+        if ww  and area[area_code_text][1]: acct[area[area_code_text][1]] = ww
+        if eww and area[area_code_text][5]: acct[area[area_code_text][5]] = eww
+    if f_wuw:
+        if wuw and area[area_code_text][2]: acct[area[area_code_text][2]] = wuw
+        if ewuw and area[area_code_text][6]: acct[area[area_code_text][6]] = ewuw
+    if f_wew:
+        if wew and area[area_code_text][3]: acct[area[area_code_text][3]] = wew
+        if ewew and area[area_code_text][7]: acct[area[area_code_text][7]] = ewew
+    if f_wa or f_ww or f_wuw or f_wew:
+        write_last(area_code_text, wa, ww, wuw, wew, report_time)
+    return acct
 
 def post_bs(mssg, lang, username, passwd):
     try:
@@ -758,6 +743,17 @@ STATUS_KEY = {
     'なし': -1,
     'None': -1
 }
+# grade → 警戒レベル表記の対応
+GRADE_LEVEL = {
+    '注意報': 'Level 2',
+    '警報': 'Level 3',
+    '危険警報': 'Level 4',
+    '特別警報': 'Level 5',
+    'Advisory': 'Level 2',
+    'Warning': 'Level 3',
+    'Urgent Warning': 'Level 4',
+    'Emergency Warning': 'Level 5',
+}
 def post_by_acct(report_datetime, acct, ref_code_status):
     ja = acct_area[acct]['lang'] == 'ja'
 
@@ -775,7 +771,8 @@ def post_by_acct(report_datetime, acct, ref_code_status):
             kind_str[key] = kind_str.get(key, '') + delimiter + name
             status[key] = st
 
-    mssg = f'【{acct_area[acct]["name"]}：{acct_area[acct]["grade"]}】\n' if ja else f'% {acct_area[acct]["name"]} : {acct_area[acct]["grade"]} %\n'
+    grade_level = f'{acct_area[acct]["grade"]}({GRADE_LEVEL.get(acct_area[acct]["grade"], "")})'
+    mssg = f'【{acct_area[acct]["name"]}：{grade_level}】\n' if ja else f'% {acct_area[acct]["name"]} : {grade_level} %\n'
 
     for k in sorted(status.keys()):
         if k < 0:
@@ -875,16 +872,55 @@ if DEBUG:
         syslog.syslog(syslog.LOG_ERR, f"fail to open data file {data_file}")
 
 ref_links = check(feed)
+
+# ── Phase 1: 全リンクのXMLを解析し (エリア, report_time) ごとに集約 ──────────
+# 同一イベントの複数電文（VPWW58/59/61 など同一 report_time）をマージすることで
+# 1イベント1投稿を実現する
+area_events = {}   # area_code_text -> { report_time -> {'current': ..., 'vpww_types': set()} }
+
 for link, ref_area in ref_links.items():
     syslog.syslog(syslog.LOG_INFO, f"DEBUG: LINK={link}, PARAM={':'.join(ref_area.keys())}")
-    report_datetime, ref_acct_kind = fetch_xml(link, ref_area)
+    vpww_type = extract_vpww_type(link)
+    result = collect_xml(link, ref_area)
+    for area_code_text, (report_time, current) in result.items():
+        area_events.setdefault(area_code_text, {})
+        ev = area_events[area_code_text]
+        ev.setdefault(report_time, {'current': {'wa': {}, 'ww': {}, 'wuw': {}, 'wew': {}}, 'vpww_types': set()})
+        for k in ['wa', 'ww', 'wuw', 'wew']:
+            ev[report_time]['current'][k].update(current[k])
+        if vpww_type:
+            ev[report_time]['vpww_types'].add(vpww_type)
 
-    # Post
-    for acct_name in ref_acct_kind:
-        syslog.syslog(syslog.LOG_INFO, f"POST {report_datetime}, {acct_name}, {ref_acct_kind[acct_name]}")
-        if not acct_name:
+# ── Phase 2: エリアごとに時系列順で比較・投稿 ────────────────────────────────
+for area_code_text, events in area_events.items():
+    ref_last = read_last(int(area_code_text))
+    for report_time in sorted(events.keys()):
+        # 古い report_time は改めてスキップ
+        if 'time' in ref_last and report_time < ref_last['time']:
             continue
-        post_by_acct(report_datetime, acct_name, ref_acct_kind[acct_name])
+
+        event     = events[report_time]
+        vpww_types = event['vpww_types']
+
+        # 担当コードの集合を構築（新形式のみ）
+        # 複数電文の担当コードを合算し「このイベントの担当範囲外」を判定する
+        if not USE_LEGACY_FEED and vpww_types:
+            responsible = {
+                k: set().union(*(VPWW_RESPONSIBLE.get(t, {}).get(k, set()) for t in vpww_types))
+                for k in ['wa', 'ww', 'wuw', 'wew']
+            }
+        else:
+            responsible = None  # 旧形式: 全コードが担当対象
+
+        ref_acct = compare_and_post(area_code_text, report_time, event['current'], responsible, ref_last)
+
+        for acct_name, code_status in ref_acct.items():
+            syslog.syslog(syslog.LOG_INFO, f"POST {report_time}, {acct_name}, {code_status}")
+            if acct_name:
+                post_by_acct(report_time, acct_name, code_status)
+
+        if ref_acct:
+            ref_last = read_last(int(area_code_text))  # 次の report_time 処理のために更新
 
 #######################
 os.unlink(LOCK_FILE)
