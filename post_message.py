@@ -1,8 +1,16 @@
 #!/usr/bin/python3
 import csv
+import re
 import sys
 import time
-from atproto import Client
+from atproto import Client, client_utils
+
+# メッセージ中の @handle と URL を検出するための正規表現。
+# handle: 英数字・ハイフン・ドットから成り、語境界(直前が行頭または空白等)で始まるもの。
+TOKEN_RE = re.compile(
+    r'(?P<mention>(?<![\w@.])@[A-Za-z0-9][A-Za-z0-9.-]*[A-Za-z0-9])'
+    r'|(?P<url>https?://[^\s]+)'
+)
 
 POST_CSV = 'post.csv'
 POST_RETRY = 3
@@ -25,11 +33,37 @@ def read_post_csv():
     return credentials
 
 
+def build_rich_text(client, message):
+    # メッセージを @handle / URL / 通常テキストに分割し、TextBuilder を組み立てる。
+    # メンションはハンドルを DID に解決して mention facet を付与する。
+    # URL は link facet を付与する。解決に失敗した場合はプレーンテキストとして扱う。
+    tb = client_utils.TextBuilder()
+    pos = 0
+    for m in TOKEN_RE.finditer(message):
+        if m.start() > pos:
+            tb.text(message[pos:m.start()])
+        token = m.group(0)
+        if m.lastgroup == 'mention':
+            handle = token[1:]  # 先頭の '@' を除く
+            try:
+                did = client.com.atproto.identity.resolve_handle({'handle': handle}).did
+                tb.mention(token, did)
+            except Exception as e:
+                print(f"Warning: Cannot resolve handle '{handle}': {e}", file=sys.stderr)
+                tb.text(token)
+        else:  # url
+            tb.link(token, token)
+        pos = m.end()
+    if pos < len(message):
+        tb.text(message[pos:])
+    return tb
+
+
 def post_message(username, password, message):
     try:
         client = Client()
         client.login(username, password)
-        client.send_post(message)
+        client.send_post(build_rich_text(client, message))
     except Exception as e:
         print(f"Error: Failed to post: {e}", file=sys.stderr)
         return 1
