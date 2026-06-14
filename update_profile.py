@@ -29,16 +29,34 @@ def update_profile(username, password, description):
     try:
         client = Client()
         client.login(username, password)
-        profile = client.app.bsky.actor.get_profile({'actor': client.me.did})
+
+        # 既存のプロフィールレコードを取得し、avatar/banner/displayName 等を保持する。
+        # get_profile はビューを返すだけで avatar/banner の blob 参照を含まないため、
+        # レコード本体を get_record で取得して description のみ差し替える。
+        try:
+            existing = client.com.atproto.repo.get_record({
+                'repo': client.me.did,
+                'collection': 'app.bsky.actor.profile',
+                'rkey': 'self',
+            })
+            record = existing.value
+        except Exception:
+            record = None
+
+        if record is not None:
+            record.description = description
+        else:
+            # レコードが存在しない場合は新規作成
+            record = {
+                '$type': 'app.bsky.actor.profile',
+                'description': description,
+            }
+
         client.com.atproto.repo.put_record({
             'repo': client.me.did,
             'collection': 'app.bsky.actor.profile',
             'rkey': 'self',
-            'record': {
-                '$type': 'app.bsky.actor.profile',
-                'displayName': profile.display_name,
-                'description': description,
-            }
+            'record': record,
         })
     except Exception as e:
         print(f"Error: Failed to update profile: {e}", file=sys.stderr)
