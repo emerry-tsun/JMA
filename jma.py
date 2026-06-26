@@ -754,6 +754,48 @@ GRADE_LEVEL = {
     'Urgent Warning': 'Level 4',
     'Emergency Warning': 'Level 5',
 }
+# ステータス文字列中の等級名 → area[] のアカウント列インデックス（ja=0..3 / en は +4）
+GRADE_INDEX_JA = {'注意報': 0, '警報': 1, '危険警報': 2, '特別警報': 3}
+GRADE_INDEX_EN = {'Advisory': 0, 'Warning': 1, 'Urgent Warning': 2, 'Emergency Warning': 3}
+# 等級名の抽出（長い名称を優先して部分一致の誤検出を防ぐ）
+GRADE_RE_JA = re.compile(r'特別警報|危険警報|警報|注意報')
+GRADE_RE_EN = re.compile(r'Emergency Warning|Urgent Warning|Advisory|Warning')
+
+def linkify_status(status_text, acct):
+    """ステータス文字列を [(text, url_or_None), ...] のセグメント列へ分解する。
+    投稿元アカウント以外の等級名（例「警報から注意報」の注意報）を、
+    同一地域・該当等級・同一言語のアカウントのプロフィールへの link facet とする。
+    """
+    ja        = acct_area[acct]['lang'] == 'ja'
+    grade_idx = GRADE_INDEX_JA if ja else GRADE_INDEX_EN
+    grade_re  = GRADE_RE_JA   if ja else GRADE_RE_EN
+    cur_grade = acct_area[acct]['grade']
+    accts     = area.get(acct_area[acct]['code'], [])
+    base      = 0 if ja else 4
+
+    segs = []
+    pos = 0
+    for m in grade_re.finditer(status_text):
+        token = m.group(0)
+        # 投稿元自身の等級（××側）はリンクしない
+        if token == cur_grade:
+            continue
+        idx = base + grade_idx[token]
+        target = accts[idx] if idx < len(accts) else ''
+        # 該当等級のアカウント未設定時はプレーンのまま
+        if not target or target not in post_acct:
+            continue
+        if m.start() > pos:
+            segs.append((status_text[pos:m.start()], None))
+        url = f"https://bsky.app/profile/{post_acct[target]['bs_username']}"
+        segs.append((token, url))
+        pos = m.end()
+    if pos < len(status_text):
+        segs.append((status_text[pos:], None))
+    if not segs:
+        segs = [(status_text, None)]
+    return segs
+
 def post_by_acct(report_datetime, acct, ref_code_status):
     ja = acct_area[acct]['lang'] == 'ja'
 
@@ -772,32 +814,42 @@ def post_by_acct(report_datetime, acct, ref_code_status):
             status[key] = st
 
     grade_level = f'{acct_area[acct]["grade"]}({GRADE_LEVEL.get(acct_area[acct]["grade"], "")})'
-    mssg = f'【{acct_area[acct]["name"]}：{grade_level}】\n' if ja else f'% {acct_area[acct]["name"]} : {grade_level} %\n'
+    # segments: [(text, url_or_None), ...] — url 付きは link facet として組み立てる
+    segments = [(f'【{acct_area[acct]["name"]}：{grade_level}】\n' if ja
+                 else f'% {acct_area[acct]["name"]} : {grade_level} %\n', None)]
 
     for k in sorted(status.keys()):
         if k < 0:
             continue
         kind_str[k] = re.sub(r'^[、,]', '', kind_str[k])
-        if k < 10:
-            form = '《{}》 {} {}\n' if ja else '[{}] {}\n'
-        elif k < 50:
-            form = '‥{}‥ {} {}\n' if ja else '-{}- {}\n'
+        if ja:
+            ob, cb = ('《', '》') if k < 10 else ('‥', '‥') if k < 50 else ('｛', '｝')
         else:
-            form = '｛{}｝ {} {}\n' if ja else '{{{}}} {}\n'
+            ob, cb = ('[', ']') if k < 10 else ('-', '-') if k < 50 else ('{', '}')
         grade = re.match(r'(.+)へ変化', status[k]) or re.search(r'Change to (.+)$', status[k])
         grade = grade.group(1) if grade else acct_area[acct]['grade']
-        mssg += form.format(status[k], kind_str[k], grade)
+        # ステータス部のみ等級名をリンク化（前後の装飾・種別名・等級はプレーン）
+        segments.append((ob, None))
+        segments.extend(linkify_status(status[k], acct))
+        if ja:
+            segments.append((f'{cb} {kind_str[k]} {grade}\n', None))
+        else:
+            segments.append((f'{cb} {kind_str[k]}\n', None))
 
     local_tz = datetime.now().astimezone().tzinfo
     dt = datetime.fromtimestamp(report_datetime, local_tz)
     formatted_time = dt.strftime('%Y-%m-%d %H:%M')
-    mssg += f" ({formatted_time})"
+    segments.append((f" ({formatted_time})", None))
 
-    if len(mssg) > 299:
-        mssg = mssg[:299] + '…'
+    body = ''.join(t for t, _ in segments)
 
     tb = client_utils.TextBuilder()
-    tb = tb.text(mssg)
+    if len(body) > 299:
+        # 上限超過時は安全側でリンクを諦めて切り詰める（facet 境界の破損を回避）
+        tb = tb.text(body[:299] + '…')
+    else:
+        for t, u in segments:
+            tb = tb.link(t, u) if u else tb.text(t)
 
     if len(tb.build_text()) + len(acct_area[acct]['tag']) + 3 < 299:
         tb = tb.text(f"\n ")
