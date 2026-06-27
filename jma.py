@@ -602,7 +602,8 @@ def compare_and_post(area_code_text, report_time, current, responsible, ref_last
                     # 担当外コードは現状維持（別電文が管理）
                     # responsible=None の旧形式では全コードが担当対象
                     if responsible is not None and code not in responsible[kind_str]:
-                        ref_kind_out[code] = f"{code_kind.get(code, code)},継続"
+                        ref_kind_out[code]   = f"{code_kind.get(code, code)},継続"
+                        ref_kind_out_e[code] = f"{code_kind_e.get(code, code)},{status_ja_en['継続']}"
                         continue
                     # 遷移先を特定（昇格→降格の順で確認）
                     key   = ref_to_up.get(code)    if ref_to_up   else None
